@@ -198,11 +198,4 @@ zero-trust-Architecture/
 
 ---
 
-## 🔒 Security
-
-Vulnerabilities: [GitHub Security Advisories](../../security/advisories/new)
-Policy: [SECURITY.md](./SECURITY.md)
-
----
-
 *Built with Subscription Reader + Resource Group Owner only. No tenant-wide permissions. Full enterprise security — within constraints.*
