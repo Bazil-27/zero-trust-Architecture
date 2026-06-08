@@ -1,0 +1,86 @@
+name: "SBOM Generation"
+
+on:
+  push:
+    branches: ["main"]
+  release:
+    types: [published]
+
+permissions:
+  contents: write   # Upload SBOM to release assets
+  security-events: write
+
+jobs:
+  sbom:
+    name: Generate SBOM — Software Bill of Materials
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── Install Syft ──────────────────────────────────────────────────────
+      - name: Install Syft
+        run: curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+
+      # ── Generate SBOM in multiple formats ─────────────────────────────────
+      - name: Generate SBOM (CycloneDX JSON)
+        run: |
+          syft . \
+            --output cyclonedx-json=sbom-cyclonedx.json \
+            --output spdx-json=sbom-spdx.json \
+            --output syft-json=sbom-syft.json \
+            --source-name "zero-trust-architecture" \
+            --source-version "${{ github.sha }}"
+
+      # ── Scan SBOM for vulnerabilities with Grype ──────────────────────────
+      - name: Install Grype
+        run: curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
+
+      - name: Scan SBOM for CVEs
+        run: |
+          grype sbom:sbom-cyclonedx.json \
+            --output table \
+            --output sarif=grype-results.sarif \
+            --fail-on high
+        continue-on-error: true  # Report but don't block — track over time
+
+      - name: Upload Grype SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: grype-results.sarif
+          category: "grype-sbom"
+
+      # ── Upload SBOM as artifact ────────────────────────────────────────────
+      - name: Upload SBOM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ github.sha }}
+          path: |
+            sbom-cyclonedx.json
+            sbom-spdx.json
+            sbom-syft.json
+            grype-results.sarif
+          retention-days: 90
+
+      # ── Attach SBOM to GitHub Release ─────────────────────────────────────
+      - name: Attach SBOM to Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            sbom-cyclonedx.json
+            sbom-spdx.json
+
+      - name: Summary
+        run: |
+          echo "## SBOM Generation Summary" >> $GITHUB_STEP_SUMMARY
+          echo "| Format | File | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| CycloneDX JSON | sbom-cyclonedx.json | ✅ Generated |" >> $GITHUB_STEP_SUMMARY
+          echo "| SPDX JSON | sbom-spdx.json | ✅ Generated |" >> $GITHUB_STEP_SUMMARY
+          echo "| Syft native | sbom-syft.json | ✅ Generated |" >> $GITHUB_STEP_SUMMARY
+          echo "| Grype CVE scan | grype-results.sarif | ✅ Scanned |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Commit: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
