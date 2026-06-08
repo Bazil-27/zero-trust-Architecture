@@ -1,0 +1,100 @@
+name: "Policy as Code — Checkov IaC Scan"
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  schedule:
+    - cron: "0 6 * * 1"  # Every Monday 6 AM UTC
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  checkov:
+    name: Checkov — IaC Policy Enforcement
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── Checkov — ARM Templates ───────────────────────────────────────────
+      - name: Checkov scan — ARM Templates
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: .
+          framework: arm
+          output_format: sarif
+          output_file_path: checkov-arm.sarif
+          soft_fail: true
+          skip_check: >
+            CKV_AZURE_131,
+            CKV_AZURE_35
+
+      - name: Upload ARM SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: checkov-arm.sarif
+          category: "checkov-arm"
+
+      # ── Checkov — Dockerfile ──────────────────────────────────────────────
+      - name: Checkov scan — Dockerfile
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: .
+          framework: dockerfile
+          output_format: sarif
+          output_file_path: checkov-docker.sarif
+          soft_fail: true
+
+      - name: Upload Dockerfile SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: checkov-docker.sarif
+          category: "checkov-dockerfile"
+
+      # ── Checkov — GitHub Actions workflows ────────────────────────────────
+      - name: Checkov scan — GitHub Actions
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: .github/workflows
+          framework: github_actions
+          output_format: sarif
+          output_file_path: checkov-actions.sarif
+          soft_fail: true
+
+      - name: Upload Actions SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: checkov-actions.sarif
+          category: "checkov-actions"
+
+      # ── Upload all results ────────────────────────────────────────────────
+      - name: Upload Checkov artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: checkov-results-${{ github.sha }}
+          path: |
+            checkov-arm.sarif
+            checkov-docker.sarif
+            checkov-actions.sarif
+          retention-days: 30
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Policy as Code Summary" >> $GITHUB_STEP_SUMMARY
+          echo "| Framework | What was checked | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|-----------------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| ARM Templates | Azure resource misconfigs | ✅ Scanned |" >> $GITHUB_STEP_SUMMARY
+          echo "| Dockerfile | Container security policies | ✅ Scanned |" >> $GITHUB_STEP_SUMMARY
+          echo "| GitHub Actions | Workflow security rules | ✅ Scanned |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "All findings → GitHub Security → Code scanning alerts" >> $GITHUB_STEP_SUMMARY
