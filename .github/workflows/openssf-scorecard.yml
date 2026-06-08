@@ -1,0 +1,61 @@
+name: "OpenSSF Scorecard"
+
+on:
+  push:
+    branches: ["main"]
+  schedule:
+    # Every Monday 3 AM UTC — weekly security rating
+    - cron: "0 3 * * 1"
+
+permissions:
+  contents: read
+  security-events: write
+  id-token: write  # Required for Scorecard publishing
+
+jobs:
+  scorecard:
+    name: OpenSSF Scorecard Analysis
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # ── Run Scorecard ─────────────────────────────────────────────────────
+      - name: Run OpenSSF Scorecard
+        uses: ossf/scorecard-action@v2.3.3
+        with:
+          results_file: scorecard-results.sarif
+          results_format: sarif
+          publish_results: true  # Publishes badge to scorecard.dev
+
+      # ── Upload to GitHub Security tab ─────────────────────────────────────
+      - name: Upload Scorecard SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: scorecard-results.sarif
+          category: "openssf-scorecard"
+
+      # ── Upload artifact ───────────────────────────────────────────────────
+      - name: Upload Scorecard artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: scorecard-results
+          path: scorecard-results.sarif
+          retention-days: 30
+
+      - name: Summary
+        run: |
+          echo "## OpenSSF Scorecard Summary" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | What it verifies |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-----------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Branch protection | Main branch rules enforced |" >> $GITHUB_STEP_SUMMARY
+          echo "| Code review | PRs require review before merge |" >> $GITHUB_STEP_SUMMARY
+          echo "| Signed releases | Commits + releases signed |" >> $GITHUB_STEP_SUMMARY
+          echo "| Token permissions | Least-privilege workflow tokens |" >> $GITHUB_STEP_SUMMARY
+          echo "| Dangerous workflows | No script injection risks |" >> $GITHUB_STEP_SUMMARY
+          echo "| Dependency pinning | Actions pinned to SHA |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "View full report: https://scorecard.dev/viewer/?uri=github.com/${{ github.repository }}" >> $GITHUB_STEP_SUMMARY
