@@ -1,0 +1,33 @@
+name: "Dependency Review"
+
+on:
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+  pull-requests: write  # Allows posting review comments on PRs
+
+jobs:
+  dependency-review:
+    name: Dependency Review — Block Vulnerable Packages
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          # Block PRs that introduce these severity levels
+          fail-on-severity: moderate
+          
+          # Block packages with these licenses
+          deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0
+          
+          # Show a summary in the PR
+          comment-summary-in-pr: always
+          
+          # Warn about packages with no license info
+          warn-on-openssf-scorecard-level: true
