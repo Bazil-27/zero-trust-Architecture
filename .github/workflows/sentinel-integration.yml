@@ -1,0 +1,83 @@
+name: "Sentinel Integration — Pipeline Security Events"
+
+on:
+  workflow_run:
+    workflows:
+      - "CodeQL SAST Security Scan"
+      - "Secret Detection"
+      - "SBOM Generation"
+      - "Container Hardening + Trivy Deep Scan"
+      - "Policy as Code — Checkov IaC Scan"
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  send-to-sentinel:
+    name: Send Pipeline Events to Microsoft Sentinel
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── Send security event to Sentinel via DCR ───────────────────────────
+      - name: Send event to Sentinel
+        env:
+          SENTINEL_WORKSPACE_ID: ${{ secrets.SENTINEL_WORKSPACE_ID }}
+          SENTINEL_PRIMARY_KEY: ${{ secrets.SENTINEL_PRIMARY_KEY }}
+        run: |
+          WORKFLOW_NAME="${{ github.event.workflow_run.name }}"
+          WORKFLOW_STATUS="${{ github.event.workflow_run.conclusion }}"
+          RUN_URL="${{ github.event.workflow_run.html_url }}"
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          REPO="${{ github.repository }}"
+          ACTOR="${{ github.event.workflow_run.triggering_actor.login }}"
+          SHA="${{ github.event.workflow_run.head_sha }}"
+
+          # Build JSON payload
+          PAYLOAD=$(cat <<JSON
+          [{
+            "TimeGenerated": "${TIMESTAMP}",
+            "WorkflowName": "${WORKFLOW_NAME}",
+            "WorkflowStatus": "${WORKFLOW_STATUS}",
+            "Repository": "${REPO}",
+            "Actor": "${ACTOR}",
+            "CommitSHA": "${SHA}",
+            "RunURL": "${RUN_URL}",
+            "Severity": $([ "$WORKFLOW_STATUS" = "failure" ] && echo '"High"' || echo '"Informational"'),
+            "EventType": "DevSecOpsPipelineEvent"
+          }]
+          JSON
+          )
+
+          # Compute HMAC-SHA256 signature for Sentinel Log Analytics API
+          DATE=$(date -u +"%a, %d %b %Y %H:%M:%S GMT")
+          CONTENT_LENGTH=$(echo -n "$PAYLOAD" | wc -c)
+          STRING_TO_SIGN="POST\n${CONTENT_LENGTH}\napplication/json\nx-ms-date:${DATE}\n/api/logs"
+          DECODED_KEY=$(echo "$SENTINEL_PRIMARY_KEY" | base64 -d | xxd -p -c 256)
+          SIGNATURE=$(echo -ne "$STRING_TO_SIGN" | openssl dgst -sha256 -mac HMAC -macopt "hexkey:${DECODED_KEY}" -binary | base64)
+
+          # POST to Sentinel workspace
+          curl -s -X POST \
+            "https://${SENTINEL_WORKSPACE_ID}.ods.opinsights.azure.com/api/logs?api-version=2016-04-01" \
+            -H "Content-Type: application/json" \
+            -H "Log-Type: DevSecOpsPipeline" \
+            -H "x-ms-date: ${DATE}" \
+            -H "Authorization: SharedKey ${SENTINEL_WORKSPACE_ID}:${SIGNATURE}" \
+            -d "$PAYLOAD"
+
+          echo "Event sent to Sentinel: ${WORKFLOW_NAME} — ${WORKFLOW_STATUS}"
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Sentinel Integration Summary" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Workflow | ${{ github.event.workflow_run.name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | ${{ github.event.workflow_run.conclusion }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Log type | DevSecOpsPipeline_CL |" >> $GITHUB_STEP_SUMMARY
+          echo "| Destination | Microsoft Sentinel Workspace |" >> $GITHUB_STEP_SUMMARY
