@@ -1,10 +1,10 @@
-# Zero Trust Architecture — Autonomous SOC Pipeline
+# Zero Trust Architecture — 
 
 **Author:** Muhammad Bazil Khan
 **Platform:** Microsoft Azure
-**Status:** ✅ Phase 4 Complete
 
 ---
+<img width="1080" height="737" alt="image" src="https://github.com/user-attachments/assets/41d01a48-04b0-45de-ad2e-556b51b8332b" />
 
 ## 📋 Project Overview
 
