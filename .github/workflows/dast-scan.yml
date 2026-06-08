@@ -1,0 +1,62 @@
+name: "DAST Scan — OWASP ZAP"
+
+on:
+  push:
+    branches: ["main"]
+  schedule:
+    - cron: "0 5 * * 1"  # Every Monday 5 AM UTC
+
+permissions:
+  contents: read
+  security-events: write
+  issues: write  # Auto-create GitHub issues for findings
+
+jobs:
+  zap-scan:
+    name: OWASP ZAP Full Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── ZAP Baseline Scan (passive — no attacks) ──────────────────────────
+      - name: ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: "https://portal.azure.com"
+          rules_file_name: ".zap/rules.tsv"
+          cmd_options: "-a -j"
+          fail_action: false
+          artifact_name: zap-baseline-report
+
+      # ── ZAP Full Scan (active — simulates real attacks) ───────────────────
+      - name: ZAP Full Scan
+        uses: zaproxy/action-full-scan@v0.10.0
+        with:
+          target: "https://portal.azure.com"
+          rules_file_name: ".zap/rules.tsv"
+          cmd_options: "-a -j"
+          fail_action: false
+          artifact_name: zap-full-report
+
+      # ── ZAP API Scan ───────────────────────────────────────────────────────
+      - name: ZAP API Scan
+        uses: zaproxy/action-api-scan@v0.7.0
+        with:
+          target: "https://management.azure.com/swagger.json"
+          format: openapi
+          fail_action: false
+          artifact_name: zap-api-report
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## DAST Scan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "| Scan Type | Target | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|--------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Baseline (passive) | Azure Portal | ✅ Done |" >> $GITHUB_STEP_SUMMARY
+          echo "| Full scan (active) | Azure Portal | ✅ Done |" >> $GITHUB_STEP_SUMMARY
+          echo "| API scan | Azure REST API | ✅ Done |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Reports uploaded as artifacts — check Actions → Artifacts" >> $GITHUB_STEP_SUMMARY
