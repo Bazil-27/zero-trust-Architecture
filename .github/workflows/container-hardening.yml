@@ -1,0 +1,101 @@
+name: "Container Hardening + Trivy Deep Scan"
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  schedule:
+    - cron: "0 4 * * 1"  # Every Monday 4 AM UTC
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  # ── Dockerfile Lint ───────────────────────────────────────────────────────
+  dockerfile-lint:
+    name: Dockerfile Security Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Lint Dockerfile with Hadolint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+          format: sarif
+          output-file: hadolint-results.sarif
+          no-fail: true  # Report, don't block
+
+      - name: Upload Hadolint SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: hadolint-results.sarif
+          category: "hadolint"
+
+  # ── Trivy — Full vulnerability scan ──────────────────────────────────────
+  trivy:
+    name: Trivy Deep Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Scan filesystem (no Docker build needed)
+      - name: Trivy — filesystem scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: "fs"
+          scan-ref: "."
+          format: "sarif"
+          output: "trivy-fs-results.sarif"
+          severity: "CRITICAL,HIGH"
+          exit-code: "0"  # Don't fail pipeline
+
+      - name: Upload Trivy filesystem SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-fs-results.sarif
+          category: "trivy-filesystem"
+
+      # Scan IaC files (ARM, Bicep, Terraform)
+      - name: Trivy — IaC config scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: "config"
+          scan-ref: "."
+          format: "sarif"
+          output: "trivy-iac-results.sarif"
+          exit-code: "0"
+
+      - name: Upload Trivy IaC SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-iac-results.sarif
+          category: "trivy-iac"
+
+      - name: Upload all Trivy results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trivy-results-${{ github.sha }}
+          path: |
+            trivy-fs-results.sarif
+            trivy-iac-results.sarif
+          retention-days: 30
+
+      - name: Summary
+        run: |
+          echo "## Container Hardening Summary" >> $GITHUB_STEP_SUMMARY
+          echo "| Tool | Scan Type | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Hadolint | Dockerfile best practices | ✅ Scanned |" >> $GITHUB_STEP_SUMMARY
+          echo "| Trivy | Filesystem CVEs (CRITICAL+HIGH) | ✅ Scanned |" >> $GITHUB_STEP_SUMMARY
+          echo "| Trivy | IaC misconfigurations | ✅ Scanned |" >> $GITHUB_STEP_SUMMARY
