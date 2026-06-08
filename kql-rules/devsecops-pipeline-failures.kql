@@ -1,0 +1,51 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// KQL Rule: DevSecOps Pipeline Security Failures
+// Table: DevSecOpsPipeline_CL (custom log from GitHub Actions)
+// Purpose: Alert when security scans fail in CI/CD pipeline
+// Severity: High
+// ─────────────────────────────────────────────────────────────────────────────
+
+DevSecOpsPipeline_CL
+| where TimeGenerated > ago(24h)
+| where WorkflowStatus_s == "failure"
+| where EventType_s == "DevSecOpsPipelineEvent"
+| project
+    TimeGenerated,
+    WorkflowName    = WorkflowName_s,
+    Status          = WorkflowStatus_s,
+    Severity        = Severity_s,
+    Actor           = Actor_s,
+    Repository      = Repository_s,
+    CommitSHA       = CommitSHA_s,
+    RunURL          = RunURL_s
+| order by TimeGenerated desc
+
+// ─────────────────────────────────────────────────────────────────────────────
+// KQL Rule: Failed scan count per workflow (last 7 days)
+// Use this in Sentinel Workbook as a chart
+// ─────────────────────────────────────────────────────────────────────────────
+
+DevSecOpsPipeline_CL
+| where TimeGenerated > ago(7d)
+| summarize
+    TotalRuns    = count(),
+    FailedRuns   = countif(WorkflowStatus_s == "failure"),
+    SuccessRuns  = countif(WorkflowStatus_s == "success")
+    by WorkflowName_s
+| extend FailureRate = round(todouble(FailedRuns) / TotalRuns * 100, 1)
+| order by FailureRate desc
+
+// ─────────────────────────────────────────────────────────────────────────────
+// KQL Rule: Suspicious actor — multiple pipeline failures
+// Alert if same user triggers 3+ failures in 1 hour
+// ─────────────────────────────────────────────────────────────────────────────
+
+DevSecOpsPipeline_CL
+| where TimeGenerated > ago(1h)
+| where WorkflowStatus_s == "failure"
+| summarize FailCount = count() by Actor_s
+| where FailCount >= 3
+| extend
+    AlertSeverity = "High",
+    AlertTitle    = strcat("Suspicious actor: ", Actor_s, " triggered ", FailCount, " pipeline failures")
+| project AlertTitle, Actor_s, FailCount, AlertSeverity
