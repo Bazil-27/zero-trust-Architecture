@@ -32,7 +32,7 @@ jobs:
 
       # ── ZAP Full Scan (active — simulates real attacks) ───────────────────
       - name: ZAP Full Scan
-        uses: zaproxy/action-full-scan@v0.10.0
+        uses: zaproxy/action-full-scan@v0.13.0
         with:
           target: "https://portal.azure.com"
           rules_file_name: ".zap/rules.tsv"
